@@ -31,7 +31,7 @@ include(FetchContent)
 
 FetchContent_Declare(minhook
 	GIT_REPOSITORY https://github.com/TsudaKageyu/minhook
-	GIT_TAG 4a455528f61b5a375b1f9d44e7d296d47f18bb18
+	GIT_TAG 1e9ad1eb42db11bfcb65461f687c656612d1b555
 )
 
 set(BUILD_TESTS OFF CACHE BOOL "")
@@ -50,7 +50,31 @@ FetchContent_Declare(spdlog
 	GIT_TAG v1.10.0
 )
 
-FetchContent_MakeAvailable(minhook protopuf)
+if(POLICY CMP0169)
+	cmake_policy(PUSH)
+	cmake_policy(SET CMP0169 OLD)
+endif()
+FetchContent_GetProperties(minhook)
+if(NOT minhook_POPULATED)
+	FetchContent_Populate(minhook)
+endif()
+if(POLICY CMP0169)
+	cmake_policy(POP)
+endif()
+set(MINHOOK_CMAKE_FILE ${minhook_SOURCE_DIR}/CMakeLists.txt)
+if(EXISTS ${MINHOOK_CMAKE_FILE})
+	file(READ ${MINHOOK_CMAKE_FILE} MINHOOK_CMAKE_CONTENT)
+	if(MINHOOK_CMAKE_CONTENT MATCHES "cmake_minimum_required\\(VERSION +([0-9.]+)")
+		set(MINHOOK_DECLARED_MIN_VERSION "${CMAKE_MATCH_1}")
+		if(MINHOOK_DECLARED_MIN_VERSION VERSION_LESS 3.10)
+			string(REGEX REPLACE "cmake_minimum_required\\(VERSION [^\\)\\n]+\\)" "cmake_minimum_required(VERSION 3.10)" MINHOOK_CMAKE_CONTENT "${MINHOOK_CMAKE_CONTENT}")
+			file(WRITE ${MINHOOK_CMAKE_FILE} "${MINHOOK_CMAKE_CONTENT}")
+		endif()
+	endif()
+endif()
+
+add_subdirectory(${minhook_SOURCE_DIR} ${minhook_BINARY_DIR})
+FetchContent_MakeAvailable(protopuf)
 if(NOT PROXINJECTEE_ONLY)
 	FetchContent_MakeAvailable(argparse spdlog)
 endif()
@@ -62,7 +86,14 @@ FetchContent_Declare(asio
 
 FetchContent_GetProperties(asio)
 if(NOT asio_POPULATED)
+  if(POLICY CMP0169)
+    cmake_policy(PUSH)
+    cmake_policy(SET CMP0169 OLD)
+  endif()
   FetchContent_Populate(asio)
+  if(POLICY CMP0169)
+    cmake_policy(POP)
+  endif()
 endif()
 
 if(NOT PROXINJECTEE_ONLY)
@@ -84,11 +115,12 @@ execute_process(COMMAND git describe --tags
 	RESULT_VARIABLE GIT_DESCRIBE_EXITCODE
 	OUTPUT_VARIABLE PROXINJECT_VERSION)
 
-if(NOT GIT_DESCRIBE_EXITCODE EQUAL 0)
-	message(FATAL_ERROR "error occurred while dumping version via `git describe`")
+if(GIT_DESCRIBE_EXITCODE EQUAL 0)
+	string(STRIP ${PROXINJECT_VERSION} PROXINJECT_VERSION)
+else()
+	set(PROXINJECT_VERSION "0.0.0-unknown")
+	message(WARNING "git describe failed (${GIT_DESCRIBE_EXITCODE}); using ${PROXINJECT_VERSION}")
 endif()
-
-string(STRIP ${PROXINJECT_VERSION} PROXINJECT_VERSION)
 configure_file(src/common/version.hpp.in src/common/version.hpp)
 
 add_library(proxinject_common INTERFACE)
