@@ -31,18 +31,18 @@ include(FetchContent)
 
 FetchContent_Declare(minhook
 	GIT_REPOSITORY https://github.com/TsudaKageyu/minhook
-	GIT_TAG 1e9ad1eb42db11bfcb65461f687c656612d1b555
+	GIT_TAG 49d03ad118cf7f6768c79a8f187e14b8f2a07f94
 )
 
 set(BUILD_TESTS OFF CACHE BOOL "")
 FetchContent_Declare(protopuf
 	GIT_REPOSITORY https://github.com/PragmaTwice/protopuf
-	GIT_TAG v2.2.0
+	GIT_TAG v2.2.1
 )
 
 FetchContent_Declare(argparse
 	GIT_REPOSITORY https://github.com/p-ranav/argparse
-	GIT_TAG v2.4
+	GIT_TAG v2.9
 )
 
 FetchContent_Declare(spdlog
@@ -74,7 +74,7 @@ endif()
 
 FetchContent_Declare(asio
 	GIT_REPOSITORY https://github.com/chriskohlhoff/asio
-	GIT_TAG asio-1-22-1
+	GIT_TAG asio-1-22-2
 )
 
 FetchContent_GetProperties(asio)

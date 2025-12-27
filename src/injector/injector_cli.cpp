@@ -48,14 +48,37 @@ auto create_parser() {
       .append();
 
   parser.add_argument("-n", "--name")
-      .help("filename of a process to inject proxy (string, without path and "
-            "file ext, i.e. `python`)")
+      .help("short filename of a process with wildcard matching to inject "
+            "proxy (string, without directory and file extension, e.g. "
+            "`python`, `py*`, `py??on`)")
+      .default_value(vector<string>{})
+      .append();
+
+  parser.add_argument("-P", "--path")
+      .help("full filename of a process with wildcard matching to inject proxy "
+            "(string, with directory and file extension, e.g. "
+            "`C:/programs/python.exe`, `C:/programs/*.exe`)")
+      .default_value(vector<string>{})
+      .append();
+
+  parser.add_argument("-r", "--name-regexp")
+      .help("regular expression for short filename of a process "
+            "to inject proxy (string, without directory and file "
+            "extension, e.g. `python`, `py.*|exp.*`)")
+      .default_value(vector<string>{})
+      .append();
+
+  parser.add_argument("-R", "--path-regexp")
+      .help("regular expression for full filename of a process "
+            "to inject proxy (string, with directory and file "
+            "extension, e.g. `C:/programs/python.exe`, "
+            "`C:/programs/(a|b).*\\.exe`)")
       .default_value(vector<string>{})
       .append();
 
   parser.add_argument("-e", "--exec")
       .help("command line started with an executable to create a new process "
-            "and inject proxy (string, i.e. `python` or `C:\\Program "
+            "and inject proxy (string, e.g. `python` or `C:\\Program "
             "Files\\a.exe --some-option`)")
       .default_value(vector<string>{})
       .append();
@@ -66,7 +89,7 @@ auto create_parser() {
       .implicit_value(true);
 
   parser.add_argument("-p", "--set-proxy")
-      .help("set a proxy address for network connections (string, i.e. "
+      .help("set a proxy address for network connections (string, e.g. "
             "`127.0.0.1:1080`)")
       .default_value(string{});
 
@@ -105,6 +128,9 @@ int main(int argc, char *argv[]) {
 
   auto pids = parser.get<vector<int>>("-i");
   auto proc_names = parser.get<vector<string>>("-n");
+  auto proc_paths = parser.get<vector<string>>("-P");
+  auto proc_re_names = parser.get<vector<string>>("-r");
+  auto proc_re_paths = parser.get<vector<string>>("-R");
   auto create_paths = parser.get<vector<string>>("-e");
 
   if (pids.empty() && proc_names.empty() && create_paths.empty()) {
@@ -185,7 +211,33 @@ int main(int argc, char *argv[]) {
   }
 
   for (const auto &name : proc_names) {
-    injector::pid_by_name(name, [&server, &report_injected](DWORD pid) {
+    injector::pid_by_name_wildcard(name,
+                                   [&server, &report_injected](DWORD pid) {
+                                     if (server.inject(pid)) {
+                                       report_injected(pid);
+                                     }
+                                   });
+  }
+
+  for (const auto &path : proc_paths) {
+    injector::pid_by_path_wildcard(path,
+                                   [&server, &report_injected](DWORD pid) {
+                                     if (server.inject(pid)) {
+                                       report_injected(pid);
+                                     }
+                                   });
+  }
+
+  for (const auto &name : proc_re_names) {
+    injector::pid_by_name_regex(name, [&server, &report_injected](DWORD pid) {
+      if (server.inject(pid)) {
+        report_injected(pid);
+      }
+    });
+  }
+
+  for (const auto &path : proc_re_paths) {
+    injector::pid_by_path_regex(path, [&server, &report_injected](DWORD pid) {
       if (server.inject(pid)) {
         report_injected(pid);
       }
@@ -194,7 +246,7 @@ int main(int argc, char *argv[]) {
 
   for (const auto &file : create_paths) {
     DWORD creation_flags = parser.get<bool>("-w") ? CREATE_NEW_CONSOLE : 0;
-    if (auto res = injector::create_process(file, creation_flags)) {
+    if (auto res = create_process(file, creation_flags)) {
       if (server.inject(res->dwProcessId)) {
         report_injected(res->dwProcessId);
       }

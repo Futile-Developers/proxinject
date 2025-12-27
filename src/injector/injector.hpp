@@ -131,56 +131,40 @@ struct injector {
     return false;
   }
 
-  template <typename F> static void pid_by_name(std::string_view name, F &&f) {
-    match_process([name, &f](const PROCESSENTRY32 &entry) {
-      std::string file_u8 = utf8_encode(entry.szExeFile);
-      if (file_u8.ends_with(".exe") &&
-          file_u8.substr(0, file_u8.size() - 4) == name) {
-        std::forward<F>(f)(entry.th32ProcessID);
+  template <typename F>
+  static void pid_by_name_wildcard(const std::string &name, F &&f) {
+    match_process_by_name([name, &f](const std::string &pname, DWORD pid) {
+      if (filename_wildcard_match(name.data(), pname.data())) {
+        std::forward<F>(f)(pid);
       }
     });
   }
 
-  template <typename F> static void enumerate_child_pids(DWORD pid, F &&f) {
-    match_process([pid, &f](const PROCESSENTRY32 &entry) {
-      if (pid == entry.th32ParentProcessID) {
-        std::forward<F>(f)(entry.th32ProcessID);
+  template <typename F>
+  static void pid_by_name_regex(const std::string &name, F &&f) {
+    match_process_by_name([name, &f](const std::string &pname, DWORD pid) {
+      if (regex_match_filename(name, pname)) {
+        std::forward<F>(f)(pid);
       }
     });
   }
 
-  static auto get_process_name(DWORD pid) {
-    std::wstring result;
-    match_process([pid, &result](const PROCESSENTRY32 &entry) {
-      if (pid == entry.th32ProcessID) {
-        result = entry.szExeFile;
+  template <typename F>
+  static void pid_by_path_wildcard(const std::string &path, F &&f) {
+    match_process_by_path([path, &f](const std::string &ppath, DWORD pid) {
+      if (filename_wildcard_match(path.data(), ppath.data())) {
+        std::forward<F>(f)(pid);
       }
     });
-
-    std::string res_u8 = utf8_encode(result);
-    if (res_u8.ends_with(".exe")) {
-      return res_u8.substr(0, res_u8.size() - 4);
-    }
-    return res_u8;
   }
 
-  static std::optional<PROCESS_INFORMATION>
-  create_process(const std::wstring &command, DWORD creation_flags = 0) {
-    STARTUPINFO startup_info{};
-    PROCESS_INFORMATION process_info{};
-    if (CreateProcessW(nullptr, std::wstring{command}.data(), nullptr, nullptr,
-                       false, creation_flags, nullptr, nullptr, &startup_info,
-                       &process_info) == 0) {
-      return std::nullopt;
-    }
-
-    return process_info;
-  }
-
-  static std::optional<PROCESS_INFORMATION>
-  create_process(const std::string &path, DWORD creation_flags = 0) {
-    auto wpath = utf8_decode(path);
-    return create_process(wpath, creation_flags);
+  template <typename F>
+  static void pid_by_path_regex(const std::string &path, F &&f) {
+    match_process_by_path([path, &f](const std::string &ppath, DWORD pid) {
+      if (regex_match_filename(path, ppath)) {
+        std::forward<F>(f)(pid);
+      }
+    });
   }
 };
 

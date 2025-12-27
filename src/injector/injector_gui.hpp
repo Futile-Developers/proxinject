@@ -51,8 +51,17 @@ struct injectee_session_ui : injectee_session {
   ce::selectable_text_box &log_;
 
   asio::awaitable<void> process_connect(const InjecteeConnect &msg) override {
-    std::stringstream stream;
+    auto curr_time = std::chrono::system_clock::now();
+    auto curr_sec = std::chrono::system_clock::to_time_t(curr_time);
+    auto curr_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        curr_time.time_since_epoch());
+    auto curr_milli_part = curr_ms.count() % 1000;
 
+    std::stringstream stream;
+    stream << "["
+           << std::put_time(std::localtime(&curr_sec), "%Y-%m-%d %H:%M:%S")
+           << "." << std::setfill('0') << std::setw(3) << curr_milli_part
+           << "] ";
     stream << (int)pid_ << ": " << *msg["syscall"_f] << " " << *msg["addr"_f];
     if (auto v = msg["proxy"_f])
       stream << " via " << *v;
@@ -67,7 +76,7 @@ struct injectee_session_ui : injectee_session {
   }
 
   asio::awaitable<void> process_pid() override {
-    vec_.emplace_back(pid_, injector::get_process_name(pid_));
+    vec_.emplace_back(pid_, get_process_name(pid_));
     refresh();
     co_return;
   }
@@ -106,20 +115,44 @@ auto make_tip_below_r(T &&element, const std::string &tip) {
   return res;
 }
 
-std::map<std::string_view, std::string_view> input_tip_text{
-    {"pid", "process ID"}, {"name", "process name"}, {"exec", "command line"}};
+const std::vector<std::pair<std::string_view, std::string_view>> input_tips{
+    {"pid", "a process ID (e.g. `2333`)"},
+    {"name",
+     "a process name with wildcard matching (e.g. `python`, `py*`, `py??on`)"},
+    {"name regexp",
+     "a regular expression for process name (e.g. `python`, `py.*|firefox`)"},
+    {"path", "a process full path with wildcard matching (e.g. "
+             "`C:/program.exe`, `C:/programs/*.exe`)"},
+    {"path regexp", "a regular expression for process full path (e.g. "
+                    "`C:/program.exe`, `C:/programs/(a|b).*`)"},
+    {"exec",
+     "command line (e.g. `python`, `C:/programs/something --some-option`)"}};
+
+const std::map<std::string_view, std::string_view>
+    input_tip_texts(input_tips.begin(), input_tips.end());
+
+const std::vector<std::string_view> input_tip_options = [] {
+  std::vector<std::string_view> result;
+
+  for (const auto &[key, _] : input_tips) {
+    result.emplace_back(key);
+  }
+
+  return result;
+}();
 
 auto make_controls(injector_server &server, ce::view &view,
                    process_vector &process_vec) {
   using namespace ce;
 
   auto [process_input, process_input_ptr] =
-      input_box(std::string(input_tip_text["pid"]));
+      input_box(std::string(input_tip_texts.at("pid")));
+
   auto [input_select, input_select_ptr] = selection_menu(
       [process_input_ptr](auto str) {
-        process_input_ptr->_placeholder = input_tip_text[str];
+        process_input_ptr->_placeholder = input_tip_texts.at(str);
       },
-      {"pid", "name", "exec"});
+      input_tip_options);
 
   auto inject_click = [input_select_ptr, process_input_ptr]<typename F>(F &&f) {
     auto text = trim_copy(process_input_ptr->get_text());
@@ -137,14 +170,38 @@ auto make_controls(injector_server &server, ce::view &view,
         return;
     } else if (option == "name") {
       bool success = false;
-      injector::pid_by_name(text, [&success, &f](DWORD pid) {
+      injector::pid_by_name_wildcard(text, [&success, &f](DWORD pid) {
+        if (std::forward<F>(f)(pid))
+          success = true;
+      });
+      if (!success)
+        return;
+    } else if (option == "name regexp") {
+      bool success = false;
+      injector::pid_by_name_regex(text, [&success, &f](DWORD pid) {
+        if (std::forward<F>(f)(pid))
+          success = true;
+      });
+      if (!success)
+        return;
+    } else if (option == "path") {
+      bool success = false;
+      injector::pid_by_path_wildcard(text, [&success, &f](DWORD pid) {
+        if (std::forward<F>(f)(pid))
+          success = true;
+      });
+      if (!success)
+        return;
+    } else if (option == "path regexp") {
+      bool success = false;
+      injector::pid_by_path_regex(text, [&success, &f](DWORD pid) {
         if (std::forward<F>(f)(pid))
           success = true;
       });
       if (!success)
         return;
     } else if (option == "exec") {
-      auto res = injector::create_process(text);
+      auto res = create_process(text);
       if (!res) {
         return;
       }

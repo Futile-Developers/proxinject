@@ -17,6 +17,7 @@
 #define PROXINJECT_COMMON_WINRAII
 
 #include "tlhelp32.h"
+#include "utils.hpp"
 #include <Windows.h>
 #include <memory>
 #include <optional>
@@ -91,8 +92,8 @@ struct virtual_memory {
 HMODULE get_current_module() {
   HMODULE mod = nullptr;
 
-  GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-                    (LPCTSTR)get_current_module, &mod);
+  GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                     (LPCTSTR)get_current_module, &mod);
 
   return mod;
 }
@@ -114,28 +115,28 @@ template <typename T> struct scope_ptr_bind {
 
 template <typename F> void match_process(F &&f) {
   if (handle snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, NULL)) {
-    PROCESSENTRY32 entry = {sizeof(PROCESSENTRY32)};
-    if (Process32First(snapshot.get(), &entry)) {
+    PROCESSENTRY32W entry = {sizeof(PROCESSENTRY32W)};
+    if (Process32FirstW(snapshot.get(), &entry)) {
       do {
         std::forward<F>(f)(entry);
-      } while (Process32Next(snapshot.get(), &entry));
+      } while (Process32NextW(snapshot.get(), &entry));
     }
   }
 }
 
-handle create_mapping(const std::wstring &name, DWORD buf_size) {
-  return CreateFileMapping(INVALID_HANDLE_VALUE, // use paging file
-                           NULL,                 // default security
-                           PAGE_READWRITE,       // read/write access
-                           0,        // maximum object size (high-order DWORD)
-                           buf_size, // maximum object size (low-order DWORD)
-                           name.c_str()); // name of mapping object
+inline handle create_mapping(const std::wstring &name, DWORD buf_size) {
+  return CreateFileMappingW(INVALID_HANDLE_VALUE, // use paging file
+                            NULL,                 // default security
+                            PAGE_READWRITE,       // read/write access
+                            0,        // maximum object size (high-order DWORD)
+                            buf_size, // maximum object size (low-order DWORD)
+                            name.c_str()); // name of mapping object
 }
 
-handle open_mapping(const std::wstring &name) {
-  return OpenFileMapping(FILE_MAP_ALL_ACCESS, // read/write access
-                         FALSE,               // do not inherit the name
-                         name.c_str());       // name of mapping object
+inline handle open_mapping(const std::wstring &name) {
+  return OpenFileMappingW(FILE_MAP_ALL_ACCESS, // read/write access
+                          FALSE,               // do not inherit the name
+                          name.c_str());       // name of mapping object
 }
 
 struct mapped_buffer : std::unique_ptr<void, static_function<UnmapViewOfFile>> {
@@ -146,5 +147,79 @@ struct mapped_buffer : std::unique_ptr<void, static_function<UnmapViewOfFile>> {
                                 FILE_MAP_ALL_ACCESS, // read/write permission
                                 0, offset, size)) {}
 };
+
+inline std::optional<std::wstring> get_process_filepath(DWORD pid) {
+  handle process =
+      OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+
+  DWORD size = MAX_PATH;
+  auto filename = std::make_unique<wchar_t[]>(size);
+  if (!QueryFullProcessImageNameW(process.get(), 0, filename.get(), &size)) {
+    return std::nullopt;
+  }
+
+  return std::wstring(filename.get(), size);
+}
+
+inline auto get_process_name(DWORD pid) {
+  std::wstring result;
+  match_process([pid, &result](const PROCESSENTRY32W &entry) {
+    if (pid == entry.th32ProcessID) {
+      result = entry.szExeFile;
+    }
+  });
+
+  std::string res_u8 = utf8_encode(result);
+  if (res_u8.ends_with(".exe")) {
+    return res_u8.substr(0, res_u8.size() - 4);
+  }
+  return res_u8;
+}
+
+template <typename F> void match_process_by_name(F &&f) {
+  match_process([&f](const PROCESSENTRY32W &entry) {
+    std::string name_u8 = utf8_encode(entry.szExeFile);
+    if (name_u8.ends_with(".exe")) {
+      auto name = name_u8.substr(0, name_u8.size() - 4);
+      std::forward<F>(f)(name, entry.th32ProcessID);
+    }
+  });
+}
+
+template <typename F> void match_process_by_path(F &&f) {
+  match_process([&f](const PROCESSENTRY32W &entry) {
+    if (auto wpath = get_process_filepath(entry.th32ProcessID)) {
+      auto path = utf8_encode(*wpath);
+      std::forward<F>(f)(path, entry.th32ProcessID);
+    }
+  });
+}
+
+template <typename F> void enumerate_child_pids(DWORD pid, F &&f) {
+  match_process([pid, &f](const PROCESSENTRY32W &entry) {
+    if (pid == entry.th32ParentProcessID) {
+      std::forward<F>(f)(entry.th32ProcessID);
+    }
+  });
+}
+
+inline std::optional<PROCESS_INFORMATION>
+create_process(const std::wstring &command, DWORD creation_flags = 0) {
+  STARTUPINFO startup_info{};
+  PROCESS_INFORMATION process_info{};
+  if (CreateProcessW(nullptr, std::wstring{command}.data(), nullptr, nullptr,
+                     false, creation_flags, nullptr, nullptr, &startup_info,
+                     &process_info) == 0) {
+    return std::nullopt;
+  }
+
+  return process_info;
+}
+
+inline std::optional<PROCESS_INFORMATION>
+create_process(const std::string &path, DWORD creation_flags = 0) {
+  auto wpath = utf8_decode(path);
+  return create_process(wpath, creation_flags);
+}
 
 #endif
