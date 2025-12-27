@@ -29,6 +29,8 @@ Optional arguments:
 -e --exec                       command line started with an executable to create a new process and inject proxy (string, i.e. `python` or `C:\Program Files\a.exe --some-option`) [default: {}]
 -l --enable-log                 enable logging for network connections [default: false]
 -p --set-proxy                  set a proxy address for network connections (string, i.e. `127.0.0.1:1080`) [default: ""]
+--proxy-username                username for proxy authentication (string) [default: ""]
+--proxy-password                password for proxy authentication (string) [default: ""]
 -w --new-console-window         create a new console window while a new console process is executed in `-e` [default: false]
 -s --subprocess                 inject subprocesses created by these already injected processes [default: false]
 ```
